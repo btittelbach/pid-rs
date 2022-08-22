@@ -1,13 +1,17 @@
 //! A proportional-integral-derivative (PID) controller.
 #![no_std]
 
-use num_traits::float::FloatCore;
+use core::cmp::{Ord, PartialOrd};
+use core::ops::{Add, Mul, Neg, Sub};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-pub struct Pid<T: FloatCore> {
+pub struct Pid<T>
+where
+    T: PartialOrd + Copy + Clone,
+{
     /// Proportional gain.
     kp: T,
     /// Integral gain.
@@ -31,7 +35,7 @@ pub struct Pid<T: FloatCore> {
 }
 
 #[derive(Debug)]
-pub struct ControlOutput<T: FloatCore> {
+pub struct ControlOutput<T> {
     /// Contribution of the P term to the output.
     pub p: T,
     /// Contribution of the I term to the output.
@@ -45,14 +49,16 @@ pub struct ControlOutput<T: FloatCore> {
 
 impl<T> Pid<T>
 where
-    T: FloatCore,
+    T: Add<Output = T>
+        + Sub<Output = T>
+        + Neg<Output = T>
+        + Mul<Output = T>
+        + Default
+        + PartialOrd
+        + Copy
+        + Clone,
 {
-    pub fn new(
-        kp: T,
-        ki: T,
-        kd: T,
-        setpoint: T,
-    ) -> Self {
+    pub fn new(kp: T, ki: T, kd: T, setpoint: T) -> Self {
         Self {
             kp,
             ki,
@@ -63,7 +69,7 @@ where
             output_limit: None,
             setpoint,
             prev_measurement: None,
-            integral_term: T::zero(),
+            integral_term: T::default(),
             direction: Direction::Direct,
         }
     }
@@ -98,7 +104,7 @@ where
     /// Resets the integral term back to zero. This may drastically change the
     /// control output.
     pub fn reset_integral_term(&mut self) {
-        self.integral_term = T::zero();
+        self.integral_term = T::default();
     }
 
     /// Given a new measurement, calculates the next control output.
@@ -114,7 +120,7 @@ where
         };
         let p = match self.p_limit {
             None => p_unbounded,
-            Some(limit) => limit.clamp(p_unbounded),
+            Some(limit) => limit.apply(p_unbounded),
         };
 
         // Mitigate output jumps when ki(t) != ki(t-1).
@@ -130,14 +136,14 @@ where
         // beyond what i_limit will allow.
         self.integral_term = match self.i_limit {
             None => self.integral_term,
-            Some(limit) => limit.clamp(self.integral_term),
+            Some(limit) => limit.apply(self.integral_term),
         };
 
         // Mitigate derivative kick: Use the derivative of the measurement
         // rather than the derivative of the error.
         let d_unbounded = -match self.prev_measurement.as_ref() {
             Some(prev_measurement) => measurement - *prev_measurement,
-            None => T::zero(),
+            None => T::default(),
         } * match self.direction {
             Direction::Direct => self.kd,
             Direction::Reverse => -self.kd,
@@ -145,13 +151,13 @@ where
         self.prev_measurement = Some(measurement);
         let d = match self.d_limit {
             None => d_unbounded,
-            Some(limit) => limit.clamp(d_unbounded),
+            Some(limit) => limit.apply(d_unbounded),
         };
 
         let output_unbounded = p + self.integral_term + d;
         let output = match self.output_limit {
             None => output_unbounded,
-            Some(limit) => limit.clamp(output_unbounded),
+            Some(limit) => limit.apply(output_unbounded),
         };
 
         ControlOutput {
@@ -164,27 +170,28 @@ where
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Limit<T: FloatCore> {
+pub struct Limit<T>
+where
+    T: PartialOrd + Copy + Clone,
+{
     min: T,
     max: T,
 }
 
-impl<T: FloatCore> Limit<T> {
+impl<T> Limit<T>
+where
+    T: PartialOrd + Copy + Clone,
+{
     pub fn new(min: T, max: T) -> Self {
-        Self {
-            min,
-            max,
-        }
+        Self { min, max }
     }
 
-    pub fn clamp(&self, value: T) -> T {
+    pub fn apply(&self, value: T) -> T {
         if value > self.max {
             self.max
-        }
-        else if value < self.min {
+        } else if value < self.min {
             self.min
-        }
-        else {
+        } else {
             value
         }
     }
@@ -302,7 +309,7 @@ mod tests {
     #[test]
     fn f32_and_f64() {
         let mut pid32 = Pid::new(2.0f32, 0.0, 0.0, 10.0);
-        
+
         let mut pid64 = Pid::new(2.0f64, 0.0, 0.0, 10.0);
 
         assert_eq!(
