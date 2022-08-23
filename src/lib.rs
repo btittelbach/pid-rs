@@ -3,6 +3,7 @@
 
 use core::cmp::{Ord, PartialOrd};
 use core::ops::{Add, Mul, Neg, Sub};
+use num_traits::Zero;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +54,7 @@ where
         + Sub<Output = T>
         + Neg<Output = T>
         + Mul<Output = T>
+        + Zero
         + Default
         + PartialOrd
         + Copy
@@ -69,7 +71,7 @@ where
             output_limit: None,
             setpoint,
             prev_measurement: None,
-            integral_term: T::default(),
+            integral_term: T::zero(),
             direction: Direction::Direct,
         }
     }
@@ -104,7 +106,7 @@ where
     /// Resets the integral term back to zero. This may drastically change the
     /// control output.
     pub fn reset_integral_term(&mut self) {
-        self.integral_term = T::default();
+        self.integral_term = T::zero();
     }
 
     /// Given a new measurement, calculates the next control output.
@@ -143,7 +145,7 @@ where
         // rather than the derivative of the error.
         let d_unbounded = -match self.prev_measurement.as_ref() {
             Some(prev_measurement) => measurement - *prev_measurement,
-            None => T::default(),
+            None => T::zero(),
         } * match self.direction {
             Direction::Direct => self.kd,
             Direction::Reverse => -self.kd,
