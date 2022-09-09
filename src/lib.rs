@@ -1,14 +1,10 @@
 //! A proportional-integral-derivative (PID) controller.
 #![no_std]
 
-use core::cmp::{Ord, PartialOrd};
+use core::cmp::PartialOrd;
 use core::ops::{Add, Mul, Neg, Sub};
 use num_traits::Zero;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Pid<T>
 where
     T: PartialOrd + Copy + Clone,
@@ -35,7 +31,6 @@ where
     direction: Direction,
 }
 
-#[derive(Debug)]
 pub struct ControlOutput<T> {
     /// Contribution of the P term to the output.
     pub p: T,
@@ -120,7 +115,7 @@ where
             Direction::Direct => error * self.kp,
             Direction::Reverse => error * -self.kp,
         };
-        let p = match self.p_limit {
+        let p = match &self.p_limit {
             None => p_unbounded,
             Some(limit) => limit.apply(p_unbounded),
         };
@@ -136,7 +131,7 @@ where
         };
         // Mitigate integral windup: Don't want to keep building up error
         // beyond what i_limit will allow.
-        self.integral_term = match self.i_limit {
+        self.integral_term = match &self.i_limit {
             None => self.integral_term,
             Some(limit) => limit.apply(self.integral_term),
         };
@@ -151,13 +146,13 @@ where
             Direction::Reverse => -self.kd,
         };
         self.prev_measurement = Some(measurement);
-        let d = match self.d_limit {
+        let d = match &self.d_limit {
             None => d_unbounded,
             Some(limit) => limit.apply(d_unbounded),
         };
 
         let output_unbounded = p + self.integral_term + d;
-        let output = match self.output_limit {
+        let output = match &self.output_limit {
             None => output_unbounded,
             Some(limit) => limit.apply(output_unbounded),
         };
@@ -171,7 +166,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy)]
 pub struct Limit<T>
 where
     T: PartialOrd + Copy + Clone,
@@ -199,7 +194,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Direction {
     Direct,
     Reverse,
