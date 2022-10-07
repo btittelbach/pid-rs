@@ -15,12 +15,16 @@ where
     ki: T,
     /// Derivative gain.
     kd: T,
+    /// Feed forward gain.
+    kff: T,
     /// Limit of contribution of P term
     p_limit: Option<Limit<T>>,
     /// Limit of contribution of I term
     i_limit: Option<Limit<T>>,
     /// Limit of contribution of D term
     d_limit: Option<Limit<T>>,
+    /// Limit of contribution of feed forward term
+    ff_limit: Option<Limit<T>>,
     /// Limit of output
     output_limit: Option<Limit<T>>,
 
@@ -39,6 +43,8 @@ pub struct ControlOutput<T> {
     pub i: T,
     /// Contribution of the D term to the output.
     pub d: T,
+    /// Contribution of the feed forward term to the output.
+    pub ff: T,
     /// Output of the PID controller.
     pub output: T,
 }
@@ -55,14 +61,16 @@ where
         + Copy
         + Clone,
 {
-    pub fn new(kp: T, ki: T, kd: T, setpoint: T) -> Self {
+    pub fn new(kp: T, ki: T, kd: T, kff: T, setpoint: T) -> Self {
         Self {
             kp,
             ki,
             kd,
+            kff,
             p_limit: None,
             i_limit: None,
             d_limit: None,
+            ff_limit: None,
             output_limit: None,
             setpoint,
             prev_measurement: None,
@@ -76,18 +84,21 @@ where
         p_limit: Option<Limit<T>>,
         i_limit: Option<Limit<T>>,
         d_limit: Option<Limit<T>>,
+        ff_limit: Option<Limit<T>>,
         output_limit: Option<Limit<T>>,
     ) {
         self.p_limit = p_limit;
         self.i_limit = i_limit;
         self.d_limit = d_limit;
+        self.ff_limit = ff_limit;
         self.output_limit = output_limit;
     }
 
-    pub fn update_pid_terms(&mut self, kp: T, ki: T, kd: T) {
+    pub fn update_pid_terms(&mut self, kp: T, ki: T, kd: T, kff: T) {
         self.kp = kp;
         self.ki = ki;
         self.kd = kd;
+        self.kff = kff;
     }
 
     pub fn update_setpoint(&mut self, setpoint: T) {
@@ -151,7 +162,16 @@ where
             Some(limit) => limit.apply(d_unbounded),
         };
 
-        let output_unbounded = p + self.integral_term + d;
+        let ff_unbounded = match self.direction {
+            Direction::Direct => self.setpoint * self.kff,
+            Direction::Reverse => self.setpoint * -self.kff,
+        };
+        let ff = match &self.ff_limit {
+            None => ff_unbounded,
+            Some(limit) => limit.apply(ff_unbounded),
+        };
+
+        let output_unbounded = p + self.integral_term + d + ff;
         let output = match &self.output_limit {
             None => output_unbounded,
             Some(limit) => limit.apply(output_unbounded),
@@ -161,6 +181,7 @@ where
             p,
             i: self.integral_term,
             d,
+            ff,
             output,
         }
     }
