@@ -32,7 +32,6 @@ where
     prev_measurement: Option<T>,
     /// `integral_term = sum[error(t) * ki(t)] (for all t)`
     integral_term: T,
-    direction: Direction,
 }
 
 pub struct ControlOutput<T> {
@@ -75,7 +74,6 @@ where
             setpoint,
             prev_measurement: None,
             integral_term: T::zero(),
-            direction: Direction::Direct,
         }
     }
 
@@ -105,10 +103,6 @@ where
         self.setpoint = setpoint;
     }
 
-    pub fn set_direction(&mut self, direction: Direction) {
-        self.direction = direction;
-    }
-
     /// Resets the integral term back to zero. This may drastically change the
     /// control output.
     pub fn reset_integral_term(&mut self) {
@@ -122,10 +116,7 @@ where
     pub fn next_control_output(&mut self, measurement: T) -> ControlOutput<T> {
         let error = self.setpoint - measurement;
 
-        let p_unbounded = match self.direction {
-            Direction::Direct => error * self.kp,
-            Direction::Reverse => error * -self.kp,
-        };
+        let p_unbounded = error * self.kp;
         let p = match &self.p_limit {
             None => p_unbounded,
             Some(limit) => limit.apply(p_unbounded),
@@ -136,10 +127,7 @@ where
         // just the error (no ki), because we support ki changing dynamically,
         // we store the entire term so that we don't need to remember previous
         // ki values.
-        self.integral_term = match self.direction {
-            Direction::Direct => self.integral_term + error * self.ki,
-            Direction::Reverse => self.integral_term + error * -self.ki,
-        };
+        self.integral_term = self.integral_term + error * self.ki;
         // Mitigate integral windup: Don't want to keep building up error
         // beyond what i_limit will allow.
         self.integral_term = match &self.i_limit {
@@ -152,20 +140,14 @@ where
         let d_unbounded = -match self.prev_measurement.as_ref() {
             Some(prev_measurement) => measurement - *prev_measurement,
             None => T::zero(),
-        } * match self.direction {
-            Direction::Direct => self.kd,
-            Direction::Reverse => -self.kd,
-        };
+        } * self.kd;
         self.prev_measurement = Some(measurement);
         let d = match &self.d_limit {
             None => d_unbounded,
             Some(limit) => limit.apply(d_unbounded),
         };
 
-        let ff_unbounded = match self.direction {
-            Direction::Direct => self.setpoint * self.kff,
-            Direction::Reverse => self.setpoint * -self.kff,
-        };
+        let ff_unbounded = self.setpoint * self.kff;
         let ff = match &self.ff_limit {
             None => ff_unbounded,
             Some(limit) => limit.apply(ff_unbounded),
@@ -213,11 +195,6 @@ where
             value
         }
     }
-}
-
-pub enum Direction {
-    Direct,
-    Reverse,
 }
 
 #[cfg(test)]
